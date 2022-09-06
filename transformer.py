@@ -41,35 +41,33 @@ class PosEncoding(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config,pad_idx,max_seq_len):
         super().__init__()
         self.config = config
-        self.shared_word_embedding = nn.Embedding(config.vocab_size, config.embedding_dim, padding_idx=0)                
+        self.pad_idx=pad_idx
+        self.max_seq_len=max_seq_len
+        self.shared_word_embedding = nn.Embedding(config.vocab_size, config.embedding_dim, padding_idx=pad_idx)                
         self.encoder = TransformerEncoder(config, shared_word_embedding=self.shared_word_embedding)
         self.decoder = TransformerDecoder(config, shared_word_embedding=self.shared_word_embedding)
+        self.linear=nn.Linear(config.hidden_dim,config.vocab_size)
+        self.softmax=nn.Softmax(dim=-1)
 
     def forward(self, enc_input_ids, enc_attention_mask, dec_input_ids,train):
-        enc_output = self.encoder(input_ids=enc_input_ids, attention_mask=enc_attention_mask)
         batch_size=enc_input_ids.size(-2)
-        output=None
-
-        if not train:
-            # repeat until all dec_outputs of every batch are <pad> tokens.
-            dec_output = self.decoder(input_ids=dec_input_ids, enc_output=enc_output,train=train)
-            output=dec_output
-            pad_vector=self.shared_word_embedding(torch.LongTensor([0]))
-            bool_pad=(pad_vector==dec_output[:,-1,:])
-
-            while (bool_pad.sum()!=batch_size*self.config.embedding_dim):                
-                dec_output = self.decoder(input_ids=dec_input_ids, enc_output=enc_output,train=train)
-                bool_pad=(pad_vector==dec_output[:,-1,:])
-
-                output=torch.cat((output,dec_output),dim=-2)
-        else:
-            dec_output=self.decoder(input_ids=dec_input_ids, enc_output=enc_output,train=train)
-            output=dec_output
+        enc_output = self.encoder(input_ids=enc_input_ids, attention_mask=enc_attention_mask)
+        dec_output=self.decoder(dec_input_ids,enc_output,train)
+        output=self.softmax(self.linear(dec_output))    # (batch_size,seq_len,vocab_size)
+        output=torch.argmax(output,dim=-1) # (batch_size,seq_len)
+        predict=output
+        seq_len=1
         
-        return output
+        if not train:
+            while (output[:,-1]==self.pad_idx).sum() != batch_size and seq_len<self.max_seq_len:
+                output=torch.argmax(self.softmax(self.linear(self.decoder(output,enc_output,train))),dim=-1)
+                predict=torch.cat((predict,output),dim=-2)
+                seq_len+=1
+        
+        return predict
 
 
 class TransformerConfig:
@@ -128,8 +126,6 @@ class TransformerDecoder(nn.Module):
         self.word_embedding = shared_word_embedding
         self.pos_embedding = PosEncoding(config)
         self.decoder_layers = nn.ModuleList([TransformerDecoderLayer(config) for i in range(config.encoder_layer_num)])
-        self.linear=nn.Linear(config.hidden_dim,config.embedding_dim)
-        self.softmax=nn.Softmax(dim=-1)
 
     def create_self_attention_mask(self,seq_len):
         mask=torch.ones((seq_len,seq_len))
@@ -149,11 +145,9 @@ class TransformerDecoder(nn.Module):
 
         for layer in self.decoder_layers:
             input_repre = layer(input=input_repre, enc_output=enc_output, dec_attention_mask=self_attention_mask,train=train)
-
-        input_repre = self.linear(input_repre)
-        output=self.softmax(input_repre)
-
-        return output
+            
+        output=input_repre
+        return input_repre
 
 
 class TransformerDecoderLayer(nn.Module):
@@ -229,7 +223,7 @@ class MultiHeadAttention(nn.Module):
         attention_score=self.softmax(attention_score)
 
         attention_value=torch.matmul(attention_score,V)
-        attention_value=attention_value.transpose(-3,-2)    ##(batch_size, seq_len, head_num, hidden_size/head_num)
+        attention_value=attention_value.transpose(-3,-2)    # (batch_size, seq_len, head_num, hidden_size/head_num)
         attention_value=attention_value.reshape(batch_size,seq_len_Q,hidden_dim)
 
         return input+attention_value
@@ -237,9 +231,9 @@ class MultiHeadAttention(nn.Module):
 device="cuda" if torch.cuda.is_available() else "cpu"
 
 model_config = TransformerConfig()
-model = Transformer(config=model_config).to(device)
+model = Transformer(config=model_config,pad_idx=0,max_seq_len=40).to(device)
 
-batch_size=64
+batch_size=1
 seq_len=128
 
 enc_input_ids_rand = torch.randint(0, 10, (batch_size,seq_len)).to(device)
@@ -248,6 +242,6 @@ dec_input_ids_rand = torch.randint(0, 10, (batch_size,seq_len)).to(device)
 
 output = model(enc_input_ids=enc_input_ids_rand, 
                enc_attention_mask=enc_attention_mask,
-               dec_input_ids=dec_input_ids_rand,train=True)
+               dec_input_ids=dec_input_ids_rand,train=False)
 
 print(output.shape)
