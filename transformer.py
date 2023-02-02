@@ -1,27 +1,6 @@
-from turtle import Turtle
 import torch
 import torch.nn as nn
 import math
-
-'''
-2022.08.21 CCLab Study 과제
-
-Transformer Implementation
-
-Transformer architecture의 핵심은
-1. multi-head attention
-2. Masking
-
-이고, 구현에서도 손이 제일 가는 부분입니다.
-
-따라서 진행하셔야할 부분은,
-
-1. Positional Encoding 구현
-2. MultiHeadAttention 구현
-(추가적으로, 가능하다면, 구현된 transformer를 이용해 Translation, Summarization 등 Task에 학습을 진행해보는 것입니다.)
-
-
-'''
 
 class PosEncoding(nn.Module):
     def __init__(self, config):
