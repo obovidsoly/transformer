@@ -126,7 +126,7 @@ class TransformerDecoder(nn.Module):
             input_repre = layer(input=input_repre, enc_output=enc_output, dec_attention_mask=self_attention_mask,train=train)
             
         output=input_repre
-        return input_repre
+        return output
 
 
 class TransformerDecoderLayer(nn.Module):
